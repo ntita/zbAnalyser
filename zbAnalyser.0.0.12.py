@@ -42,7 +42,7 @@ class Alarm(Enum):
 
 class ZbCheckRow():
     """ строка страницы файла Support Report """
-    def __init__(self, checkname, order, severity=Severity.Ok, observation='Log is clear', dateof='', nodename=''):
+    def __init__(self, checkname, order, severity=Severity.Ok, observation='No alarms', dateof='', nodename=''):
         super(ZbCheckRow, self).__init__()
         self.CheckName = checkname
         self.Severity = severity
@@ -175,7 +175,9 @@ class ZbAnalyser():
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
                         r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
-                        '(?: >>> 1[.]time = \d{2}:\d{2})?\n?(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''))
+                        '(?: >>> 1[.]time = \d{2}:\d{2})?\n?(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''),
+                       ('Check Event and System Logs', 'lgesmr 7d', r'(?s)={10,}\nTimestamp \(UTC\) +Type +Merged Log' +
+                        ' Entry\n={10,}\n(.*)', r'(?i)[\d-]+ [\d:]+ +\w+ +(?:(?:(?:\w+=\w+),)+(\w+=\w+)|(?:Crash on (\d+), device=(\d+) [\w\d]+)) +(.+)', ''))
         self.output = []
         self.wb = None
         self.log = None
@@ -291,7 +293,54 @@ class ZbAnalyser():
                 if element is None or element.groups()[0] == '0':
                     nextStr.Severity = Severity.Warning
                     nextStr.Observation = 'Health Check Schedule is NOK'
-                else: nextStr.Observation = 'Health Check Schedule is OK'
+                else:
+                    nextStr.Observation = 'Health Check Schedule is OK'
+            if check[Check.Command.value] == self.checks[2][Check.Command.value]:
+                if elementRE.search(outputLines):
+                    sum = 0
+                    MOs = set()
+                    nextStr.Observation = ''
+                    for element in elementRE.findall(outputLines):
+                        if element[3] is not None and element[3].lower().find('ranap_cninitiatedresetresource') >= 0:
+                            nextStr.Severity = Severity.Critical
+                            MOs.add(element[0])
+                            sum += 1
+                    if sum != 0:
+                        if nextStr.Observation != '':
+                            nextStr.Observation += '\n'
+                        nextStr.Observation += 'Ranap_CNInitiatedResetResource %s sum: %d' % (str(MOs), sum)
+                    sum = 0
+                    MOs = set()
+                    for element in elementRE.findall(outputLines):
+                        if element[3] is not None and element[3].lower().find('ipethpacketdatarouter_cnnotrespondingtogtpecho') >= 0:
+                            if nextStr.Severity != Severity.Critical:
+                                nextStr.Severity = Severity.Major
+                            MOs.add(element[0])
+                            sum += 1
+                    if sum != 0:
+                        if nextStr.Observation != '':
+                            nextStr.Observation += '\n'
+                        nextStr.Observation += 'IpEthPacketDataRouter_CnNotRespondingToGTPEcho %s sum: %d' % (str(MOs), sum)
+                    sum = 0
+                    MOs = set()
+                    prevdevice = ''
+                    for element in elementRE.findall(outputLines):
+                        if element[1] is None or element[1] == '':
+                            continue
+                        if prevdevice != '' and prevdevice != element[2]:
+                            nextStr.Severity = Severity.Critical
+                        elif int(element[1]) > 1 and nextStr.Severity != Severity.Critical:
+                            nextStr.Severity = Severity.Major
+                        elif int(element[1]) == 1 and nextStr.Severity != Severity.Critical and nextStr.Severity != Severity.Major:
+                            nextStr.Severity = Severity.Minor
+                        MOs.add(', '.join(['Crash on %s' % element[1], 'device=%s' % element[2]]))
+                        sum += 1
+                    if sum != 0:
+                        if nextStr.Observation != '':
+                            nextStr.Observation += '\n'
+                        nextStr.Observation += '%s sum: %d' % (str(MOs), sum)
+                    if nextStr.Observation == '':
+                        nextStr.Observation = 'No alarms'
             self.output.append(nextStr)
 
     def uparse(self, order):
