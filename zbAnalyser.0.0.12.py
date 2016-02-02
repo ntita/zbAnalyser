@@ -182,7 +182,9 @@ class ZbAnalyser():
                        ('Check Node Restart and System Downtime', 'lgd', r'(?si)={10,}\nTimestamp \(UTC\) +RestartType' +
                         r'/Reason +Configuration Version +SwRelease +CPP Downtime +Appl. Downtime +JVM Downtime\n={10' +
                         r',}\n(.+)\n\nNode uptime since last restart: \d+ \w+ \((?:(\d+) days)?,? ?(?:(\d+) hours)?',
-                        r'(?i)(\d{4})-(\d{2})-(\d{2}) [\d:]+ Spontaneous', ''))
+                        r'(?i)(\d{4})-(\d{2})-(\d{2}) [\d:]+ Spontaneous', ''),
+                       ('Check Date and Time Synchronization', 'lh coremp readclock', r'(?si)\d{6}-\d{2}:\d{2}:\d{2} ' +
+                        '[\w \d./=]+\n(.+)', r'\$ lhsh 00\d{2}00 readclock\n\d+: Date: 20(\d{2})-(\d{2})-(\d{2})', ''))
         self.output = []
         self.wb = None
         self.log = None
@@ -371,6 +373,15 @@ class ZbAnalyser():
                 if sum == 1:
                     nextStr.Severity = Severity.Major
                 nextStr.Observation = 'Node uptime since last restart: %s days, %s hours' % (outputLinesRE.group(2), outputLinesRE.group(3))
+            if check[Check.Command.value] in [self.checks[4][Check.Command.value]]:
+                if elementRE.search(outputLines):
+                    for element in elementRE.findall(outputLines):
+                        if element[0]+element[1]+element[2] != nextStr.DateOf and nextStr.Severity != Severity.Critical and nextStr.Severity != Severity.Major:
+                            nextStr.Severity = Severity.Minor
+                            if nextStr.Observation != '':
+                                nextStr.Observation += '\n'
+                            nextStr.Observation += 'Please check NTP'
+                            break
             self.output.append(nextStr)
 
     def uparse(self, order):
