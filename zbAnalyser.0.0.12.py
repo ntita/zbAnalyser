@@ -308,7 +308,7 @@ class ZbAnalyser():
                     if sum != 0:
                         if nextStr.Observation != '':
                             nextStr.Observation += '\n'
-                        nextStr.Observation += 'Ranap_CNInitiatedResetResource %s sum: %d' % (str(MOs), sum)
+                        nextStr.Observation += 'Ranap_CNInitiatedResetResource %s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
                     sum = 0
                     MOs = set()
                     for element in elementRE.findall(outputLines):
@@ -320,7 +320,7 @@ class ZbAnalyser():
                     if sum != 0:
                         if nextStr.Observation != '':
                             nextStr.Observation += '\n'
-                        nextStr.Observation += 'IpEthPacketDataRouter_CnNotRespondingToGTPEcho %s sum: %d' % (str(MOs), sum)
+                        nextStr.Observation += 'IpEthPacketDataRouter_CnNotRespondingToGTPEcho %s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
                     sum = 0
                     MOs = set()
                     prevdevice = ''
@@ -338,7 +338,19 @@ class ZbAnalyser():
                     if sum != 0:
                         if nextStr.Observation != '':
                             nextStr.Observation += '\n'
-                        nextStr.Observation += '%s sum: %d' % (str(MOs), sum)
+                        nextStr.Observation += '%s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
+                    sum = 0
+                    MOs = set()
+                    for element in elementRE.findall(outputLines):
+                        if element[3] is not None and element[3].lower().find('a non-local mau has been chosen as the active client') >= 0:
+                            if nextStr.Severity != Severity.Critical and nextStr.Severity != Severity.Minor and nextStr.Severity != Severity.Major:
+                                nextStr.Severity = Severity.Warning
+                            MOs.add(element[0])
+                            sum += 1
+                    if sum != 0:
+                        if nextStr.Observation != '':
+                            nextStr.Observation += '\n'
+                        nextStr.Observation += 'A Non-Local MAU Has Been Chosen as the Active Client %s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
                     if nextStr.Observation == '':
                         nextStr.Observation = 'No alarms'
             self.output.append(nextStr)
