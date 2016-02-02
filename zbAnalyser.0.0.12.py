@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import re
+import copy
 import os
 from enum import Enum
+import datetime
 import openpyxl
 from openpyxl.worksheet import *
-import copy
 
 
 class Severity(Enum):
@@ -176,8 +176,13 @@ class ZbAnalyser():
                         r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
                         r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
                         '(?: >>> 1[.]time = \d{2}:\d{2})?\n?(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''),
-                       ('Check Event and System Logs', 'lgesmr 7d', r'(?s)={10,}\nTimestamp \(UTC\) +Type +Merged Log' +
-                        ' Entry\n={10,}\n(.*)', r'(?i)[\d-]+ [\d:]+ +\w+ +(?:(?:(?:\w+=\w+),)+(\w+=\w+)|(?:Crash on (\d+), device=(\d+) [\w\d]+)) +(.+)', ''))
+                       ('Check Event and System Logs', 'lgesmr 7d', r'(?si)={10,}\nTimestamp \(UTC\) +Type +Merged Log' +
+                        ' Entry\n={10,}\n(.*)', r'(?i)[\d-]+ [\d:]+ +\w+ +(?:(?:(?:\w+=\w+),)+(\w+=\w+)|(?:Crash on ' +
+                        '(\d+), device=(\d+) [\w\d]+)) +(.+)', ''),
+                       ('Check Node Restart and System Downtime', 'lgd', r'(?si)={10,}\nTimestamp \(UTC\) +RestartType' +
+                        r'/Reason +Configuration Version +SwRelease +CPP Downtime +Appl. Downtime +JVM Downtime\n={10' +
+                        r',}\n(.+)\n\nNode uptime since last restart: \d+ \w+ \((?:(\d+) days)?,? ?(?:(\d+) hours)?',
+                        r'(?i)(\d{4})-(\d{2})-(\d{2}) [\d:]+ Spontaneous', ''))
         self.output = []
         self.wb = None
         self.log = None
@@ -353,6 +358,19 @@ class ZbAnalyser():
                         nextStr.Observation += 'A Non-Local MAU Has Been Chosen as the Active Client %s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
                     if nextStr.Observation == '':
                         nextStr.Observation = 'No alarms'
+            if check[Check.Command.value] in [self.checks[3][Check.Command.value]]:
+                sum = 0
+                if elementRE.search(outputLines):
+                    for element in elementRE.findall(outputLines):
+                        opdate = datetime.date(int(element[0]), int(element[1]), int(element[2]))
+                        repdate = datetime.date(int(nextStr.DateOf[0:2]), int(nextStr.DateOf[2:4]), int(nextStr.DateOf[4:6]))
+                        if (opdate - repdate).days <= 14:
+                            sum += 1
+                if sum > 1:
+                    nextStr.Severity = Severity.Critical
+                if sum == 1:
+                    nextStr.Severity = Severity.Major
+                nextStr.Observation = 'Node uptime since last restart: %s days, %s hours' % (outputLinesRE.group(2), outputLinesRE.group(3))
             self.output.append(nextStr)
 
     def uparse(self, order):
