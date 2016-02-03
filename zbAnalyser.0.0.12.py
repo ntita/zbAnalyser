@@ -11,14 +11,14 @@ from openpyxl.worksheet import *
 
 class Severity(Enum):
     """The values of column Severity"""
-    Critical = 'Critical'
-    Major = 'Major'
-    Minor = 'Minor'
-    Warning = 'Warning'
-    Ok = 'Ok'
+    Critical = (0, 'Critical')
+    Major = (1, 'Major')
+    Minor = (2, 'Minor')
+    Warning = (3, 'Warning')
+    Ok = (10, 'Ok')
 
     def __str__(self):
-        return self.value
+        return self.value[1]
 
 
 class Check(Enum):
@@ -172,10 +172,6 @@ class ZbAnalyser():
         self.checks = (('Check active Alarms', 'alt', r'(?si)={10,}\nDate & Time \(Local\) +S +Specific Problem +MO ' +
                         '\(Cause/AdditionalInfo\)\n={10,}\n(.*?)\n?>>> Total: \d+ Alarms \(\d+ Critical, \d+ Major\)',
                         r'20\d{2}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (\w) ((?:\w+ ?)+) +(.*)', 'Alarms_and_events.xlsx'),
-                       ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
-                        r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
-                        r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
-                        '(?: >>> 1[.]time = \d{2}:\d{2})?\n?(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''),
                        ('Check Event and System Logs', 'lgesmr 7d', r'(?si)={10,}\nTimestamp \(UTC\) +Type +Merged Log' +
                         ' Entry\n={10,}\n(.*)', r'(?i)[\d-]+ [\d:]+ +\w+ +(?:(?:(?:\w+=\w+),)+(\w+=\w+)|(?:Crash on ' +
                         '(\d+), device=(\d+) [\w\d]+)) +(.+)', ''),
@@ -184,7 +180,14 @@ class ZbAnalyser():
                         r',}\n(.+)\n\nNode uptime since last restart: \d+ \w+ \((?:(\d+) days)?,? ?(?:(\d+) hours)?',
                         r'(?i)(\d{4})-(\d{2})-(\d{2}) [\d:]+ Spontaneous', ''),
                        ('Check Date and Time Synchronization', 'lh coremp readclock', r'(?si)\d{6}-\d{2}:\d{2}:\d{2} ' +
-                        '[\w \d./=]+\n(.+)', r'\$ lhsh 00\d{2}00 readclock\n\d+: Date: 20(\d{2})-(\d{2})-(\d{2})', ''))
+                        '[\w \d./=]+\n(.+)', r'\$ lhsh 00\d{2}00 readclock\n\d+: Date: 20(\d{2})-(\d{2})-(\d{2})', ''),
+                       ('Check Network Synchronization', ('get Synchronization=1', 'st tusync'), '(.*)', '', ''),
+                       ('Check the M3UA Associations', 'st m3ua', '(?si)Proxy +Adm State +Op. +State +MO\n={10,}\n(.*?)={10,}\nTotal: \d+ MOs',
+                        r'(?i) +\d+ +\d+ \(DISABLED\) +(?:[\w\d]+=[\w\d]+,)*M3uAssociation=(\w{2})[\d\w]+', ''),
+                       ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
+                        r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
+                        r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
+                        '(?: >>> 1[.]time = \d{2}:\d{2})?\n?(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''))
         self.output = []
         self.wb = None
         self.log = None
@@ -225,198 +228,188 @@ class ZbAnalyser():
             self.logdate = logdatere.group(1)
         for num, check in enumerate(self.checks):
             nextStr = ZbCheckRow(checkname=check[Check.Caption.value], order=num, nodename=nodename)
+            nextStr.Observation = ''
             commandRegExp = r'(?m)^(?:[\w\d.]+)> %s\n((?:.*\n?(?!(?:^[\w\d.]+)>))*)'
             if (check[Check.AlarmsReference.value] != '' and
                 os.path.exists(check[Check.AlarmsReference.value]) and
                self.alarmsReferenceName != check[Check.AlarmsReference.value]):
                 self.alarmsReferenceName = check[Check.AlarmsReference.value]
                 self.init_alarms()
-            outputRE = re.search(commandRegExp % check[Check.Command.value], self.log)
-            if outputRE is None:
+            outputREO = re.compile(commandRegExp % (check[Check.Command.value] if not isinstance(check[Check.Command.value], tuple) else str(check[Check.Command.value]).replace('(','(?:', 1).replace(", ","|",1).replace("'","")))
+            if outputREO.search(self.log) is None:
                 print('outputRE is fail!')
                 continue
-            output = outputRE.group(1)
-            if output is None:
-                print('Command RegExp fail')
-                continue
-            commandDateRE = re.search(r'(\d{6})-\d{2}:\d{2}:\d{2}', output)
-            if commandDateRE:
-                nextStr.DateOf = commandDateRE.group(1)
-            outputLinesRE = re.search(check[Check.Output.value], output)
-            if outputLinesRE is None:
-                print('outputLinesRE is fail!')
-                continue
-            outputLines = outputLinesRE.group(1)
-            elementRE = re.compile(check[Check.Element.value])
-            if check[Check.Command.value] in [self.checks[0][Check.Command.value]]:
-                if elementRE.search(outputLines):
-                    for element in elementRE.findall(outputLines):
-                        if self.alarmsReferenceName == check[Check.AlarmsReference.value] and self.alarms is not None:
-                            for alarm in self.alarms:
-                                if element[1].lower().strip(' ') == alarm[Alarm.specificProblem.value].lower():
-                                    if element[0] == 'c' and alarm[Alarm.perceivedSeverity.value].lower() == 'critical':
-                                        nextStr.alarmsCritical += 1
-                                        nextStr.alarmsDetail.append(element[1])
-                                    elif element[0] == 'M' and alarm[Alarm.perceivedSeverity.value].lower() == 'major':
-                                        nextStr.alarmsMajor += 1
-                                        nextStr.alarmsDetail.append(element[1])
-                                    elif element[0] == 'm' and alarm[Alarm.perceivedSeverity.value].lower() == 'minor':
-                                        nextStr.alarmsMinor += 1
-                                    elif element[0] == 'w' and alarm[Alarm.perceivedSeverity.value].lower() == 'warning':
-                                        nextStr.alarmsWarning += 1
-                                    else:
-                                        nextStr.alarmsCollision += 1
-                                        print('Unknown perceivedSeverity!')
-                                    print(element)
-                                    break
-                nextStr.alarmsTotal = nextStr.alarmsCritical + nextStr.alarmsMajor + nextStr.alarmsMinor + \
-                                      nextStr.alarmsWarning + nextStr.alarmsCollision
-                if nextStr.alarmsTotal > 0:
-                    nextStr.Observation = 'Total %d alarms:' % nextStr.alarmsTotal
-                    if nextStr.alarmsCritical > 0:
-                        nextStr.Observation += ' %d critical' % nextStr.alarmsCritical
-                    if nextStr.alarmsMajor > 0:
-                        nextStr.Observation += (',' if nextStr.alarmsCritical > 0 else '') + \
-                                               ' %d major' % nextStr.alarmsMajor
-                    if nextStr.alarmsMinor > 0:
-                        nextStr.Observation += (',' if nextStr.alarmsCritical > 0 or nextStr.alarmsMajor > 0 else '') + \
-                                               ' %d minor' % nextStr.alarmsMinor
-                    if nextStr.alarmsWarning > 0:
-                        nextStr.Observation += (',' if nextStr.alarmsCritical > 0 or nextStr.alarmsMajor > 0 or nextStr.alarmsMinor > 0 else '') + \
-                                               ' %d warning' % nextStr.alarmsWarning
-                    if nextStr.alarmsCollision > 0:
-                        nextStr.Observation += (',' if nextStr.alarmsCritical > 0 or nextStr.alarmsMajor > 0 or nextStr.alarmsMinor > 0 or nextStr.alarmsWarning > 0 else '') + \
-                                               ' %d collision' % nextStr.alarmsCollision
-                    if nextStr.alarmsCritical > 0:
-                        nextStr.Severity = Severity.Critical
-                    elif nextStr.alarmsMajor > 0:
-                        nextStr.Severity = Severity.Major
-                    elif nextStr.alarmsMinor > 0:
-                        nextStr.Severity = Severity.Minor
-                    elif nextStr.alarmsWarning > 0:
-                        nextStr.Severity = Severity.Warning
-            if check[Check.Command.value] == self.checks[1][Check.Command.value]:
-                element = elementRE.search(outputLines)
-                if element is None or element.groups()[0] == '0':
-                    nextStr.Severity = Severity.Warning
-                    nextStr.Observation = 'Health Check Schedule is NOK'
-                else:
-                    nextStr.Observation = 'Health Check Schedule is OK'
-            if check[Check.Command.value] == self.checks[2][Check.Command.value]:
-                if elementRE.search(outputLines):
-                    sum = 0
-                    MOs = set()
-                    nextStr.Observation = ''
-                    for element in elementRE.findall(outputLines):
-                        if element[3] is not None and element[3].lower().find('ranap_cninitiatedresetresource') >= 0:
+            for output in outputREO.findall(self.log):
+                if output is None:
+                    print('Command RegExp fail')
+                    continue
+                commandDateRE = re.search(r'(\d{6})-\d{2}:\d{2}:\d{2}', output)
+                if commandDateRE:
+                    nextStr.DateOf = commandDateRE.group(1)
+                outputLinesRE = re.search(check[Check.Output.value], output)
+                if outputLinesRE is None:
+                    print('outputLinesRE is fail!')
+                    continue
+                outputLines = outputLinesRE.group(1)
+                elementRE = re.compile(check[Check.Element.value])
+                if check[Check.Command.value] in [self.checks[0][Check.Command.value]]:
+                    if elementRE.search(outputLines):
+                        for element in elementRE.findall(outputLines):
+                            if self.alarmsReferenceName == check[Check.AlarmsReference.value] and self.alarms is not None:
+                                for alarm in self.alarms:
+                                    if element[1].lower().strip(' ') == alarm[Alarm.specificProblem.value].lower():
+                                        if element[0] == 'c' and alarm[Alarm.perceivedSeverity.value].lower() == 'critical':
+                                            nextStr.alarmsCritical += 1
+                                            nextStr.alarmsDetail.append(element[1])
+                                        elif element[0] == 'M' and alarm[Alarm.perceivedSeverity.value].lower() == 'major':
+                                            nextStr.alarmsMajor += 1
+                                            nextStr.alarmsDetail.append(element[1])
+                                        elif element[0] == 'm' and alarm[Alarm.perceivedSeverity.value].lower() == 'minor':
+                                            nextStr.alarmsMinor += 1
+                                        elif element[0] == 'w' and alarm[Alarm.perceivedSeverity.value].lower() == 'warning':
+                                            nextStr.alarmsWarning += 1
+                                        else:
+                                            nextStr.alarmsCollision += 1
+                                            print('Unknown perceivedSeverity!')
+                                        print(element)
+                                        break
+                    nextStr.alarmsTotal = nextStr.alarmsCritical + nextStr.alarmsMajor + nextStr.alarmsMinor + \
+                                          nextStr.alarmsWarning + nextStr.alarmsCollision
+                    if nextStr.alarmsTotal > 0:
+                        nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Total %d alarms:' % \
+                                                                                            nextStr.alarmsTotal
+                        comma = False
+                        if nextStr.alarmsCritical > 0:
+                            nextStr.Observation += ' %d critical' % nextStr.alarmsCritical
+                            comma = True
                             nextStr.Severity = Severity.Critical
-                            MOs.add(element[0])
-                            sum += 1
-                    if sum != 0:
-                        if nextStr.Observation != '':
-                            nextStr.Observation += '\n'
-                        nextStr.Observation += 'Ranap_CNInitiatedResetResource %s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
-                    sum = 0
-                    MOs = set()
-                    for element in elementRE.findall(outputLines):
-                        if element[3] is not None and element[3].lower().find('ipethpacketdatarouter_cnnotrespondingtogtpecho') >= 0:
-                            if nextStr.Severity != Severity.Critical:
+                        if nextStr.alarmsMajor > 0:
+                            nextStr.Observation += (',' if comma else '') + ' %d major' % nextStr.alarmsMajor
+                            comma = True
+                            if nextStr.Severity.value[0] > Severity.Major.value[0]:
                                 nextStr.Severity = Severity.Major
-                            MOs.add(element[0])
-                            sum += 1
-                    if sum != 0:
-                        if nextStr.Observation != '':
-                            nextStr.Observation += '\n'
-                        nextStr.Observation += 'IpEthPacketDataRouter_CnNotRespondingToGTPEcho %s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
-                    sum = 0
-                    MOs = set()
-                    prevdevice = ''
-                    for element in elementRE.findall(outputLines):
-                        if element[1] is None or element[1] == '':
-                            continue
-                        if prevdevice != '' and prevdevice != element[2]:
-                            nextStr.Severity = Severity.Critical
-                        elif int(element[1]) > 1 and nextStr.Severity != Severity.Critical:
-                            nextStr.Severity = Severity.Major
-                        elif int(element[1]) == 1 and nextStr.Severity != Severity.Critical and nextStr.Severity != Severity.Major:
-                            nextStr.Severity = Severity.Minor
-                        MOs.add(', '.join(['Crash on %s' % element[1], 'device=%s' % element[2]]))
-                        sum += 1
-                    if sum != 0:
-                        if nextStr.Observation != '':
-                            nextStr.Observation += '\n'
-                        nextStr.Observation += '%s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
-                    sum = 0
-                    MOs = set()
-                    for element in elementRE.findall(outputLines):
-                        if element[3] is not None and element[3].lower().find('a non-local mau has been chosen as the active client') >= 0:
-                            if nextStr.Severity != Severity.Critical and nextStr.Severity != Severity.Minor and nextStr.Severity != Severity.Major:
+                        if nextStr.alarmsMinor > 0:
+                            nextStr.Observation += (',' if comma else '') + ' %d minor' % nextStr.alarmsMinor
+                            comma = True
+                            if nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                                nextStr.Severity = Severity.Minor
+                        if nextStr.alarmsWarning > 0:
+                            nextStr.Observation += (',' if comma else '') + ' %d warning' % nextStr.alarmsWarning
+                            comma = True
+                            if nextStr.Severity.value[0] > Severity.Warning.value[0]:
                                 nextStr.Severity = Severity.Warning
-                            MOs.add(element[0])
-                            sum += 1
-                    if sum != 0:
-                        if nextStr.Observation != '':
-                            nextStr.Observation += '\n'
-                        nextStr.Observation += 'A Non-Local MAU Has Been Chosen as the Active Client %s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
-                    if nextStr.Observation == '':
-                        nextStr.Observation = 'No alarms'
-            if check[Check.Command.value] in [self.checks[3][Check.Command.value]]:
-                sum = 0
-                if elementRE.search(outputLines):
-                    for element in elementRE.findall(outputLines):
-                        opdate = datetime.date(int(element[0]), int(element[1]), int(element[2]))
-                        repdate = datetime.date(int(nextStr.DateOf[0:2]), int(nextStr.DateOf[2:4]), int(nextStr.DateOf[4:6]))
-                        if (opdate - repdate).days <= 14:
-                            sum += 1
-                if sum > 1:
-                    nextStr.Severity = Severity.Critical
-                if sum == 1:
-                    nextStr.Severity = Severity.Major
-                nextStr.Observation = 'Node uptime since last restart: %s days, %s hours' % (outputLinesRE.group(2), outputLinesRE.group(3))
-            if check[Check.Command.value] in [self.checks[4][Check.Command.value]]:
-                if elementRE.search(outputLines):
-                    for element in elementRE.findall(outputLines):
-                        if element[0]+element[1]+element[2] != nextStr.DateOf and nextStr.Severity != Severity.Critical and nextStr.Severity != Severity.Major:
-                            nextStr.Severity = Severity.Minor
+                if check[Check.Command.value] == self.checks[1][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        sum = 0
+                        MOs = set()
+                        for element in elementRE.findall(outputLines):
+                            if element[3] is not None and element[3].lower().find('ranap_cninitiatedresetresource') >= 0:
+                                nextStr.Severity = Severity.Critical
+                                MOs.add(element[0])
+                                sum += 1
+                        if sum != 0:
                             if nextStr.Observation != '':
                                 nextStr.Observation += '\n'
-                            nextStr.Observation += 'Please check NTP'
-                            break
+                            nextStr.Observation += 'Ranap_CNInitiatedResetResource %s sum: %d' % \
+                                                   (str(MOs).strip('{}').replace("'",""), sum)
+                        sum = 0
+                        MOs = set()
+                        for element in elementRE.findall(outputLines):
+                            if element[3] is not None and element[3].lower().find('ipethpacketdatarouter_cnnotresponding' +
+                                                                                  'togtpecho') >= 0:
+                                if nextStr.Severity.value[0] > Severity.Major.value[0]:
+                                    nextStr.Severity = Severity.Major
+                                MOs.add(element[0])
+                                sum += 1
+                        if sum != 0:
+                            if nextStr.Observation != '':
+                                nextStr.Observation += '\n'
+                            nextStr.Observation += 'IpEthPacketDataRouter_CnNotRespondingToGTPEcho %s sum: %d' % \
+                                                   (str(MOs).strip('{}').replace("'",""), sum)
+                        sum = 0
+                        MOs = set()
+                        prevdevice = ''
+                        for element in elementRE.findall(outputLines):
+                            if element[1] is None or element[1] == '':
+                                continue
+                            if prevdevice != '' and prevdevice != element[2]:
+                                nextStr.Severity = Severity.Critical
+                            elif int(element[1]) > 1 and nextStr.Severity.value[0] > Severity.Major.value[0]:
+                                nextStr.Severity = Severity.Major
+                            elif int(element[1]) == 1 and nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                                nextStr.Severity = Severity.Minor
+                            MOs.add(', '.join(['Crash on %s' % element[1], 'device=%s' % element[2]]))
+                            sum += 1
+                        if sum != 0:
+                            if nextStr.Observation != '':
+                                nextStr.Observation += '\n'
+                            nextStr.Observation += '%s sum: %d' % (str(MOs).strip('{}').replace("'",""), sum)
+                        sum = 0
+                        MOs = set()
+                        for element in elementRE.findall(outputLines):
+                            if element[3] is not None and element[3].lower().find('a non-local mau has been chosen as the' +
+                                                                                  ' active client') >= 0:
+                                if nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                                    nextStr.Severity = Severity.Warning
+                                MOs.add(element[0])
+                                sum += 1
+                        if sum != 0:
+                            if nextStr.Observation != '':
+                                nextStr.Observation += '\n'
+                            nextStr.Observation += 'A Non-Local MAU Has Been Chosen as the Active Client %s sum: %d' % \
+                                                   (str(MOs).strip('{}').replace("'",""), sum)
+                if check[Check.Command.value] in [self.checks[2][Check.Command.value]]:
+                    sum = 0
+                    if elementRE.search(outputLines):
+                        for element in elementRE.findall(outputLines):
+                            opdate = datetime.date(int(element[0]), int(element[1]), int(element[2]))
+                            repdate = datetime.date(2000 + int(nextStr.DateOf[0:2]), int(nextStr.DateOf[2:4]), int(nextStr.DateOf[4:6]))
+                            if (opdate - repdate).days <= 14:
+                                sum += 1
+                    if sum > 1:
+                        nextStr.Severity = Severity.Critical
+                    if sum == 1:
+                        nextStr.Severity = Severity.Major
+                    nextStr.Observation = 'Node uptime since last restart: %s days, %s hours' % \
+                                          (outputLinesRE.group(2), outputLinesRE.group(3))
+                if check[Check.Command.value] in [self.checks[3][Check.Command.value]]:
+                    if elementRE.search(outputLines):
+                        for element in elementRE.findall(outputLines):
+                            if element[0]+element[1]+element[2] != nextStr.DateOf and nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                                nextStr.Severity = Severity.Minor
+                                if nextStr.Observation != '':
+                                    nextStr.Observation += '\n'
+                                nextStr.Observation += 'Please check NTP'
+                                break
+                if check[Check.Command.value] in [self.checks[4][Check.Command.value]]:
+                    pass
+                if check[Check.Command.value] in [self.checks[5][Check.Command.value]]:
+                    if elementRE.search(outputLines):
+                        cs, ps, rs, MOs = 0, 0, 0, 0
+                        for element in elementRE.findall(outputLines):
+                            if element.lower() == 'cs':
+                                cs += 1
+                            elif element.lower() == 'ps':
+                                ps += 1
+                            elif element.lower() == 'rs':
+                                rs += 1
+                            MOs += 1
+                        if cs >= 2 or ps >= 2:
+                            nextStr.Severity = Severity.Critical
+                        elif cs == 1 or ps == 1 or rs > 0 and nextStr.Severity.value[0] > Severity.Major.value[0]:
+                            nextStr.Severity = Severity.Major
+                        if MOs > 0:
+                            nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'Num of failed M3UA: %d' % MOs
+                if check[Check.Command.value] == self.checks[6][Check.Command.value]:
+                    element = elementRE.search(outputLines)
+                    if element is None or element.groups()[0] == '0':
+                        nextStr.Severity = Severity.Warning
+                        nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check Schedule is NOK'
+                    else:
+                        nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check Schedule is OK'
+            if nextStr.Observation == '':
+                nextStr.Observation = 'No alarms'
             self.output.append(nextStr)
-
-    def uparse(self, order):
-        if self.inStr is None: return None
-        critical = 0
-        major = 0
-        minor = 0
-        warning = 0
-        for row in self.alarms:
-            if self.inStr.lower().find(str(row[0]).lower()) != -1:
-                if row[3].lower() == 'critical':
-                    critical += 1
-                elif row[3].lower() == 'major':
-                    major += 1
-                elif row[3].lower() == 'minor':
-                    minor += 1
-                else:
-                    warning += 1
-        Observation = '%i Alarms:' % (critical+major+minor+warning)
-        Observation += ' %i Critical' % critical if critical > 0 else ''
-        Observation += ' %i Major' % major if major > 0 else ''
-        Observation += ' %i Minor' % minor if minor > 0 else ''
-        Observation += ' %i Warning' % warning if warning > 0 else ''
-        if critical > 0:
-            S = Severity.Critical
-        elif major > 0:
-            S = Severity.Major
-        elif minor > 0:
-            S = Severity.Minor
-        elif warning > 0:
-            S = Severity.Warning
-        else:
-            S = Severity.Ok
-            Observation = 'Log is clear'
-        return ZbCheckRow(self.checkNames[self.command], S, Observation, order, None)
 
     def savexls(self,filename):
         count = 1
