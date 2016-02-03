@@ -198,7 +198,8 @@ class ZbAnalyser():
                         '{10,}\nTotal: \d+ MOs', '(?si) *\d+ +[\d\w]+ \(DISABLED\) +((?:[\w\d_]+=[\w\d_]+,?)+)', ''),
                        ("Check CV's stored on RNC", 'cvls', r"(?i)>>> Total: (\d+ CV's, \d+ UP's)", "(?i)(\d+)" +
                         "[\w', ]+(\d+)", ''),
-                       # ('Check CV Database inconsistency', 'dbc', '', '', ''),
+                       ('Check CV Database inconsistency', 'dbc', '(?si)(Conclusion: the database is NOT OK)',
+                        '(?si)(Conclusion: the database is NOT OK)', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
                         r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
@@ -476,6 +477,17 @@ class ZbAnalyser():
                         nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + "Total: %s CV's, %s UP's" %\
                                                 (element[0], element[1])
                 if check[Check.Command.value] == self.checks[10][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        for element in elementRE.findall(outputLines):
+                            if outputLines.lower().find('roamfroeutranetworkdbtable') >= 0:
+                                if nextStr.Severity.value[0] > Severity.Major.value[0]:
+                                    nextStr.Severity = Severity.Major
+                            else:
+                                nextStr.Severity = Severity.Critical
+                            nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'database is NOT OK'
+                    else:
+                        nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'database is OK'
+                if check[Check.Command.value] == self.checks[11][Check.Command.value]:
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0] == '0':
                         nextStr.Severity = Severity.Warning
