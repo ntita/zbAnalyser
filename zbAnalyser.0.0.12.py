@@ -414,6 +414,8 @@ class ZbAnalyser():
                             nextStr.Severity = Severity.Critical
                         elif cs == 1 or ps == 1 or rs > 0 and nextStr.Severity.value[0] > Severity.Major.value[0]:
                             nextStr.Severity = Severity.Major
+                        elif MOs > 0 and nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                            nextStr.Severity = Severity.Minor
                         if MOs > 0:
                             nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'Num of failed M3UA: %d' % MOs
                 if check[Check.Command.value] in [self.checks[6][Check.Command.value]]:
