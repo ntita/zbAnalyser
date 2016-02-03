@@ -182,8 +182,18 @@ class ZbAnalyser():
                        ('Check Date and Time Synchronization', 'lh coremp readclock', r'(?si)\d{6}-\d{2}:\d{2}:\d{2} ' +
                         '[\w \d./=]+\n(.+)', r'\$ lhsh 00\d{2}00 readclock\n\d+: Date: 20(\d{2})-(\d{2})-(\d{2})', ''),
                        ('Check Network Synchronization', ('get Synchronization=1', 'st tusync'), '(.*)', '', ''),
-                       ('Check the M3UA Associations', 'st m3ua', '(?si)Proxy +Adm State +Op. +State +MO\n={10,}\n(.*?)={10,}\nTotal: \d+ MOs',
-                        r'(?i) +\d+ +\d+ \(DISABLED\) +(?:[\w\d]+=[\w\d]+,)*M3uAssociation=(\w{2})[\d\w]+', ''),
+                       ('Check the M3UA Associations', 'st m3ua', '(?si)Proxy +Adm State +Op. +State +MO\n={10,}\n(.' +
+                        '*?)={10,}\nTotal: \d+ MOs', r'(?i) +\d+ +\d+ \(DISABLED\) +(?:[\w\d]+=[\w\d]+,)*' +
+                        'M3uAssociation=(\w{2})[\d\w]+', ''),
+                       ('Check RNC CC, DC and PDR devices', 'std', '(?i)-{10,}\nType +%Up +Total +Enabled\(1\) +' +
+                        'Disabled\(0\) +Locked\(L\) +Active\(A\) +Idle\(I\) +Busy\(B\) +Unallocated\n-{10,}\n((?:\w+' +
+                        ' +\d+% +\d+ +\d+ +\d+ +\d+ +\d+ +\d+ +\d+ +\d+\n)+)-{10,}\nTOT +\d+% +\d+ +\d+ +\d+ +\d+ +' +
+                        '\d+ +\d+ +\d+ +\d', '(?i)(\w+) +(\d+)% +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +' +
+                        '(\d+)', ''),
+                       ('Check IubLink and Utrancell resource Status', 'strt', r'(?si)Following \d+ sites are up:' +
+                        '\n-{10,}\n[^\n]*\n-{10,}\n.*?-{10,}\n\nFollowing \d+ sites are totally or partially ' +
+                        'unavailable:\n-{10,}\n[^\n]*\n-{10,}\n.*?-{10,}\n\n((?:[\w ]+: +\d+ of +\d+ (?:\w+ )+\(\d+' +
+                        '\.\d+ %\)\n?)*)', '((?:(?:\w+) ?)+): +(\d+) of +(\d+) [\w ]+\(([\d.]+) %\)', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
                         r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
@@ -400,7 +410,48 @@ class ZbAnalyser():
                             nextStr.Severity = Severity.Major
                         if MOs > 0:
                             nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'Num of failed M3UA: %d' % MOs
-                if check[Check.Command.value] == self.checks[6][Check.Command.value]:
+                if check[Check.Command.value] in [self.checks[6][Check.Command.value]]:
+                    if elementRE.search(outputLines):
+                        disabled, unallocate, pdr, cc, dc = 0, 0, 0, 0, 0
+                        for element in elementRE.findall(outputLines):
+                            if element[0].lower() == 'pdr':
+                                pdr = int(element[1])
+                            elif element[0].lower() == 'cc':
+                                cc = int(element[1])
+                            elif element[0].lower() == 'dc':
+                                dc = int(element[1])
+                            disabled += int(element[4])
+                            unallocate += int(element[9])
+                        nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'PDR/CC/DC UP status %d%%/%d%%/%d%%' % (pdr, cc, dc)
+                        if disabled > 1 or unallocate > 1:
+                            nextStr.Severity = Severity.Critical
+                        elif disabled > 0 or unallocate > 0 and nextStr.Severity.value[0] > Severity.Major.value[0]:
+                            nextStr.Severity = Severity.Major
+                if check[Check.Command.value] == self.checks[7][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        saaa, sabb, saper, ucaaa, ucabb, ucaper = 0, 0, 0.0, 0, 0, 0.0
+                        for element in elementRE.findall(outputLines):
+                            if element[0].lower().strip(' ') == 'site availability':
+                                saaa = int(element[1])
+                                sabb = int(element[2])
+                                saper = float(element[3])
+                            elif element[0].lower().strip(' ') == 'unlocked cell availability':
+                                ucaaa = int(element[1])
+                                ucabb = int(element[2])
+                                ucaper = float(element[3])
+                        if sabb - saaa >= 5 and ucaper >= 0 and ucaper <= 90:
+                            if ucabb - ucaaa >= 40:
+                                nextStr.Severity = Severity.Critical
+                            elif ucabb - ucaaa >= 20 and nextStr.Severity.value[0] > Severity.Major.value[0]:
+                                nextStr.Severity = Severity.Major
+                            elif ucabb - ucaaa >= 10 and nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                                nextStr.Severity = Severity.Minor
+                            elif nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                                nextStr.Severity = Severity.Warning
+                        nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + ('%d of %d sites are' +
+                                                ' fully operational (%3.2f %%)\n%d of %d unlocked cells are up (%3.2f %%)') %\
+                                                (saaa, sabb, saper, ucaaa, ucabb, ucaper)
+                if check[Check.Command.value] == self.checks[8][Check.Command.value]:
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0] == '0':
                         nextStr.Severity = Severity.Warning
