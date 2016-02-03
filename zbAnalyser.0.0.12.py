@@ -196,6 +196,9 @@ class ZbAnalyser():
                         '\.\d+ %\)\n?)*)', '((?:(?:\w+) ?)+): +(\d+) of +(\d+) [\w ]+\(([\d.]+) %\)', ''),
                        ('Check RANAP and Iu link', 'st ranap', '(?si)Proxy +Adm +State +Op. State +MO\n={10,}\n(.*?)=' +
                         '{10,}\nTotal: \d+ MOs', '(?si) *\d+ +[\d\w]+ \(DISABLED\) +((?:[\w\d_]+=[\w\d_]+,?)+)', ''),
+                       ("Check CV's stored on RNC", 'cvls', r"(?i)>>> Total: (\d+ CV's, \d+ UP's)", "(?i)(\d+)" +
+                        "[\w', ]+(\d+)", ''),
+                       # ('Check CV Database inconsistency', 'dbc', '', '', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
                         r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
@@ -461,9 +464,18 @@ class ZbAnalyser():
                                           element[0].lower()) is not None):
                                 nextStr.Severity = Severity.Critical
                     nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'RANAP is OK'
-
-
                 if check[Check.Command.value] == self.checks[9][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        for element in elementRE.findall(outputLines):
+                            if (int(element[0]) >= 30 and int(element[1]) >= 2 and
+                                        nextStr.Severity.value[0] > Severity.Major.value[0]):
+                                nextStr.Severity = Severity.Major
+                            elif ((int(element[0]) >= 30 or int(element[1]) >= 2) and
+                                        nextStr.Severity.value[0] > Severity.Minor.value[0]):
+                                nextStr.Severity = Severity.Minor
+                        nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + "Total: %s CV's, %s UP's" %\
+                                                (element[0], element[1])
+                if check[Check.Command.value] == self.checks[10][Check.Command.value]:
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0] == '0':
                         nextStr.Severity = Severity.Warning
