@@ -194,6 +194,8 @@ class ZbAnalyser():
                         '\n-{10,}\n[^\n]*\n-{10,}\n.*?-{10,}\n\nFollowing \d+ sites are totally or partially ' +
                         'unavailable:\n-{10,}\n[^\n]*\n-{10,}\n.*?-{10,}\n\n((?:[\w ]+: +\d+ of +\d+ (?:\w+ )+\(\d+' +
                         '\.\d+ %\)\n?)*)', '((?:(?:\w+) ?)+): +(\d+) of +(\d+) [\w ]+\(([\d.]+) %\)', ''),
+                       ('Check RANAP and Iu link', 'st ranap', '(?si)Proxy +Adm +State +Op. State +MO\n={10,}\n(.*?)=' +
+                        '{10,}\nTotal: \d+ MOs', '(?si) *\d+ +[\d\w]+ \(DISABLED\) +((?:[\w\d_]+=[\w\d_]+,?)+)', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
                         r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
@@ -452,6 +454,16 @@ class ZbAnalyser():
                                                 ' fully operational (%3.2f %%)\n%d of %d unlocked cells are up (%3.2f %%)') %\
                                                 (saaa, sabb, saper, ucaaa, ucabb, ucaper)
                 if check[Check.Command.value] == self.checks[8][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        for element in elementRE.findall(outputLines):
+                            if (element[0].lower().find('sccpaplocal=ranaplocal') >= 0 or
+                                re.search(r'(?i)CnOperator=.*, (IuLink=1,Ranap=.*CS|IuLink=2,Ranap=.*PS)',
+                                          element[0].lower()) is not None):
+                                nextStr.Severity = Severity.Critical
+                    nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'RANAP is OK'
+
+
+                if check[Check.Command.value] == self.checks[9][Check.Command.value]:
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0] == '0':
                         nextStr.Severity = Severity.Warning
