@@ -198,8 +198,10 @@ class ZbAnalyser():
                         '{10,}\nTotal: \d+ MOs', '(?si) *\d+ +[\d\w]+ \(DISABLED\) +((?:[\w\d_]+=[\w\d_]+,?)+)', ''),
                        ("Check CV's stored on RNC", 'cvls', r"(?i)>>> Total: (\d+ CV's, \d+ UP's)", "(?i)(\d+)" +
                         "[\w', ]+(\d+)", ''),
-                       ('Check CV Database inconsistency', 'dbc', '(?si)(Conclusion: the database is NOT OK)',
+                       ('Check CV Database inconsistency', 'dbc', '(?si)(Conclusion: the database is (?:NOT )?OK)',
                         '(?si)(Conclusion: the database is NOT OK)', ''),
+                       ('Current software level', 'cvcu', '(?i)((?:[\w+ ]+: +[\w%=/]+ +[\w/]+ +W[\d.]+ \([\w\d.-]+' +
+                        '\)\n|-{10,}\n)+)', '[\w+ ]+: +[\w%=/]+ +[\w/]+ +W([\d.]+) \([\w\d.-]+\)', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
                         r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
@@ -253,18 +255,18 @@ class ZbAnalyser():
                 self.init_alarms()
             outputREO = re.compile(commandRegExp % (check[Check.Command.value] if not isinstance(check[Check.Command.value], tuple) else str(check[Check.Command.value]).replace('(','(?:', 1).replace(", ","|",1).replace("'","")))
             if outputREO.search(self.log) is None:
-                print('outputRE is fail!')
+                print('%s - outputRE is fail!' % nextStr.CheckName)
                 continue
             for output in outputREO.findall(self.log):
                 if output is None:
-                    print('Command RegExp fail')
+                    print('%s - Command RegExp fail' % nextStr.CheckName)
                     continue
                 commandDateRE = re.search(r'(\d{6})-\d{2}:\d{2}:\d{2}', output)
                 if commandDateRE:
                     nextStr.DateOf = commandDateRE.group(1)
                 outputLinesRE = re.search(check[Check.Output.value], output)
                 if outputLinesRE is None:
-                    print('outputLinesRE is fail!')
+                    print('%s - outputLinesRE is fail!' % nextStr.CheckName)
                     continue
                 outputLines = outputLinesRE.group(1)
                 elementRE = re.compile(check[Check.Element.value])
@@ -286,8 +288,8 @@ class ZbAnalyser():
                                             nextStr.alarmsWarning += 1
                                         else:
                                             nextStr.alarmsCollision += 1
-                                            print('Unknown perceivedSeverity!')
-                                        print(element)
+                                            print('%s - Unknown perceivedSeverity!' % nextStr.CheckName)
+                                        # print(element)
                                         break
                     nextStr.alarmsTotal = nextStr.alarmsCritical + nextStr.alarmsMajor + nextStr.alarmsMinor + \
                                           nextStr.alarmsWarning + nextStr.alarmsCollision
@@ -490,6 +492,17 @@ class ZbAnalyser():
                     else:
                         nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'database is OK'
                 if check[Check.Command.value] == self.checks[11][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        minVer = ''
+                        for element in elementRE.findall(outputLines):
+                            if element == '14':
+                                if nextStr.Severity.value[0] > Severity.Major.value[0]:
+                                    nextStr.Severity = Severity.Major
+                            elif element >= '13' and element < '14':
+                                nextStr.Severity = Severity.Critical
+                            minVer = element if minVer == '' or element < minVer else minVer
+                        nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'Release W%s' % minVer
+                if check[Check.Command.value] == self.checks[12][Check.Command.value]:
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0] == '0':
                         nextStr.Severity = Severity.Warning
@@ -498,6 +511,7 @@ class ZbAnalyser():
                         nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check Schedule is OK'
             if nextStr.Observation == '':
                 nextStr.Observation = 'No alarms'
+            print('%s - Done' % nextStr.CheckName)
             self.output.append(nextStr)
 
     def savexls(self,filename):
