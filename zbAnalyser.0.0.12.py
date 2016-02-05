@@ -169,43 +169,67 @@ class ZbAnalyser():
         self.currentTemplate = '160123_t.xlsx'
         self.referenceError = 'Alarms_and_events.xlsx'
         self.dirs = { 'inputDir': './input', 'outputDir': './output', 'logDir': './log' }
-        self.checks = (('Check active Alarms', 'alt', r'(?si)={10,}\nDate & Time \(Local\) +S +Specific Problem +MO ' +
-                        '\(Cause/AdditionalInfo\)\n={10,}\n(.*?)\n?>>> Total: \d+ Alarms \(\d+ Critical, \d+ Major\)',
+        self.checks = (('Check active Alarms', 'alt', 
+                        r'(?si)Date & Time \(Local\) +S +Specific Problem +MO \(Cause/AdditionalInfo\)\n'
+                        r'={10,}\n'
+                        r'(.*?)\n?'
+                        r'>>> Total: \d+ Alarms \(\d+ Critical, \d+ Major\)',
                         r'20\d{2}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (\w) ((?:\w+ ?)+) +(.*)', 'Alarms_and_events.xlsx'),
-                       ('Check Event and System Logs', 'lgesmr 7d', r'(?si)={10,}\nTimestamp \(UTC\) +Type +Merged Log' +
-                        ' Entry\n={10,}\n(.*)', r'(?i)[\d-]+ [\d:]+ +\w+ +(?:(?:(?:\w+=\w+),)+(\w+=\w+)|(?:Crash on ' +
-                        '(\d+), device=(\d+) [\w\d]+)) +(.+)', ''),
-                       ('Check Node Restart and System Downtime', 'lgd', r'(?si)={10,}\nTimestamp \(UTC\) +RestartType' +
-                        r'/Reason +Configuration Version +SwRelease +CPP Downtime +Appl. Downtime +JVM Downtime\n={10' +
-                        r',}\n(.+)\n\nNode uptime since last restart: \d+ \w+ \((?:(\d+) days)?,? ?(?:(\d+) hours)?',
+                       ('Check Event and System Logs', 'lgesmr 7d',
+                        r'(?si)Timestamp \(UTC\) +Type +Merged Log Entry\n'
+                        r'={10,}\n'
+                        r'(.*)', r'(?i)[\d-]+ [\d:]+ +\w+ +(?:(?:(?:\w+=\w+),)+(\w+=\w+)|(?:Crash on (\d+), '
+                                 r'device=(\d+) [\w\d]+)) +(.+)', ''),
+                       ('Check Node Restart and System Downtime', 'lgd',
+                        r'(?si)Timestamp \(UTC\) +RestartType/Reason +Configuration Version +SwRelease +CPP Downtime +'
+                        r'Appl. Downtime +JVM Downtime\n'
+                        r'={10,}\n'
+                        r'(.+)\n+'
+                        r'Node uptime since last restart: \d+ \w+ \((?:(\d+) days)?,? ?(?:(\d+) hours)?',
                         r'(?i)(\d{4})-(\d{2})-(\d{2}) [\d:]+ Spontaneous', ''),
-                       ('Check Date and Time Synchronization', 'lh coremp readclock', r'(?si)\d{6}-\d{2}:\d{2}:\d{2} ' +
-                        '[\w \d./=]+\n(.+)', r'\$ lhsh 00\d{2}00 readclock\n\d+: Date: 20(\d{2})-(\d{2})-(\d{2})', ''),
+                       ('Check Date and Time Synchronization', 'lh coremp readclock',
+                        r'(?si)\d{6}-\d{2}:\d{2}:\d{2} [\w \d./=]+\n(.+)',
+                        r'\$ lhsh 00\d{2}00 readclock\n\d+: Date: 20(\d{2})-(\d{2})-(\d{2})', ''),
                        ('Check Network Synchronization', ('get Synchronization=1', 'st tusync'), '(.*)', '', ''),
-                       ('Check the M3UA Associations', 'st m3ua', '(?si)Proxy +Adm State +Op. +State +MO\n={10,}\n(.' +
-                        '*?)={10,}\nTotal: \d+ MOs', r'(?i) +\d+ +\d+ \(DISABLED\) +(?:[\w\d]+=[\w\d]+,)*' +
-                        'M3uAssociation=(\w{2})[\d\w]+', ''),
-                       ('Check RNC CC, DC and PDR devices', 'std', '(?i)-{10,}\nType +%Up +Total +Enabled\(1\) +' +
-                        'Disabled\(0\) +Locked\(L\) +Active\(A\) +Idle\(I\) +Busy\(B\) +Unallocated\n-{10,}\n((?:\w+' +
-                        ' +\d+% +\d+ +\d+ +\d+ +\d+ +\d+ +\d+ +\d+ +\d+\n)+)-{10,}\nTOT +\d+% +\d+ +\d+ +\d+ +\d+ +' +
-                        '\d+ +\d+ +\d+ +\d', '(?i)(\w+) +(\d+)% +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +' +
-                        '(\d+)', ''),
-                       ('Check IubLink and Utrancell resource Status', 'strt', r'(?si)Following \d+ sites are up:' +
-                        '\n-{10,}\n[^\n]*\n-{10,}\n.*?-{10,}\n\nFollowing \d+ sites are totally or partially ' +
-                        'unavailable:\n-{10,}\n[^\n]*\n-{10,}\n.*?-{10,}\n\n((?:[\w ]+: +\d+ of +\d+ (?:\w+ )+\(\d+' +
-                        '\.\d+ %\)\n?)*)', '((?:(?:\w+) ?)+): +(\d+) of +(\d+) [\w ]+\(([\d.]+) %\)', ''),
-                       ('Check RANAP and Iu link', 'st ranap', '(?si)Proxy +Adm +State +Op. State +MO\n={10,}\n(.*?)=' +
-                        '{10,}\nTotal: \d+ MOs', '(?si) *\d+ +[\d\w]+ \(DISABLED\) +((?:[\w\d_]+=[\w\d_]+,?)+)', ''),
-                       ("Check CV's stored on RNC", 'cvls', r"(?i)>>> Total: (\d+ CV's, \d+ UP's)", "(?i)(\d+)" +
-                        "[\w', ]+(\d+)", ''),
+                       ('Check the M3UA Associations', 'st m3ua',
+                        '(?si)Proxy +Adm State +Op. +State +MO\n={10,}\n'
+                        '(.*?)={10,}\n'
+                        'Total: \d+ MOs',
+                        r'(?i) +\d+ +\d+ \(DISABLED\) +(?:[\w\d]+=[\w\d]+,)*M3uAssociation=(\w{2})[\d\w]+', ''),
+                       ('Check RNC CC, DC and PDR devices', 'std',
+                        '(?i)-{10,}\nType +%Up +Total +Enabled\(1\) +Disabled\(0\) +Locked\(L\) +Active\(A\) +'
+                        'Idle\(I\) +Busy\(B\) +Unallocated\n-{10,}\n'
+                        '((?:\w+ +\d+% +\d+ +\d+ +\d+ +\d+ +\d+ +\d+ +\d+ +\d+\n)+)-{10,}\n'
+                        'TOT +\d+% +\d+ +\d+ +\d+ +\d+ +\d+ +\d+ +\d+ +\d',
+                        '(?i)(\w+) +(\d+)% +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +(\d+) +(\d+)', ''),
+                       ('Check IubLink and Utrancell resource Status', 'strt',
+                        r'(?si)Following \d+ sites are up:.*'
+                        r'Following \d+ sites are totally or partially unavailable:.*-{10,}\n+'
+                        r'(.*)',
+                        r'([\w ]+): +(\d+) of +(\d+) [\w ]+\(([\d.]+) %\)', ''),
+                       ('Check RANAP and Iu link', 'st ranap',
+                        '(?si)Proxy +Adm +State +Op. State +MO\n'
+                        '={10,}\n'
+                        '(.*?)={10,}\n'
+                        'Total: \d+ MOs', '(?si) *\d+ +[\d\w]+ \(DISABLED\) +((?:[\w\d_]+=[\w\d_]+,?)+)', ''),
+                       ("Check CV's stored on RNC", 'cvls',
+                        r"(?i)>>> Total: (\d+ CV's, \d+ UP's)", "(?i)(\d+)[\w', ]+(\d+)", ''),
                        ('Check CV Database inconsistency', 'dbc', '(?si)(Conclusion: the database is (?:NOT )?OK)',
                         '(?si)(Conclusion: the database is NOT OK)', ''),
-                       ('Current software level', 'cvcu', '(?i)((?:[\w+ ]+: +[\w%=/]+ +[\w/]+ +W[\d.]+ \([\w\d.-]+' +
-                        '\)\n|-{10,}\n)+)', '[\w+ ]+: +[\w%=/]+ +[\w/]+ +W([\d.]+) \([\w\d.-]+\)', ''),
+                       ('Current software level', 'cvcu',
+                        '(?i)((?:[\w+ ]+: +[\w%=/]+ +[\w/]+ +W[\d.]+ \([\w\d.-]+\)\n|-{10,}\n)+)',
+                        '[\w+ ]+: +[\w%=/]+ +[\w/]+ +W([\d.]+) \([\w\d.-]+\)', ''),
+                       # ('Check ethernet connectivity (i.e. Internal_IP_Transport Vlan)', ('steg', 'stip'), '', '', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
-                        r'(?si)={10,}\nMO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ Mos',
-                        r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?(?: >>> Struct\[\d\] +has \d+.*)?\n?' +
-                        '(?: >>> 1[.]time = \d{2}:\d{2})?\n?(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''))
+                        r'(?si)={10,}\n'
+                        r'MO +Attribute +Value\n={10,}\n'
+                        r'(.*?)\n?'
+                        r'={10,}\n'
+                        r'Total: \d+ Mos',
+                        r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?'
+                        r'(?: >>> Struct\[\d\] +has \d+.*)?\n?'
+                        r'(?: >>> 1[.]time = \d{2}:\d{2})?\n?'
+                        r'(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''))
         self.output = []
         self.wb = None
         self.log = None
@@ -256,6 +280,9 @@ class ZbAnalyser():
             outputREO = re.compile(commandRegExp % (check[Check.Command.value] if not isinstance(check[Check.Command.value], tuple) else str(check[Check.Command.value]).replace('(','(?:', 1).replace(", ","|",1).replace("'","")))
             if outputREO.search(self.log) is None:
                 print('%s - outputRE is fail!' % nextStr.CheckName)
+                outputLinesRE = re.compile(r'(?si)Board +Position +Remote +Speed +Conf +AutNg +Sys +STL +Prio +Cost '
+                                           r'+RtCost +Role-State +Edge +PbitQMap +UnIng +Vlans\n={10,}\n.*?={10,}\n'
+                                           r'Total: \d+ MOs')
                 continue
             for output in outputREO.findall(self.log):
                 if output is None:
@@ -263,7 +290,10 @@ class ZbAnalyser():
                     continue
                 commandDateRE = re.search(r'(\d{6})-\d{2}:\d{2}:\d{2}', output)
                 if commandDateRE:
-                    nextStr.DateOf = commandDateRE.group(1)
+                    nextStr.DateOf += (' ' if nextStr.DateOf != '' else '') + commandDateRE.group(1)
+                if nextStr.CheckName == 'Check ethernet connectivity (i.e. Internal_IP_Transport Vlan)' :
+
+                    continue
                 outputLinesRE = re.search(check[Check.Output.value], output)
                 if outputLinesRE is None:
                     print('%s - outputLinesRE is fail!' % nextStr.CheckName)
@@ -557,6 +587,8 @@ class ZbAnalyser():
                 self.parseLog(inFile)
                 for cell in ws.rows[0]:
                     cell.value = cell.value.replace('v<#LogDate#>', self.logdate) if cell.value else None
+                es = self.wb['Error list. Summary']
+                escurrow = 5
                 for row in self.output:
                     cur_row = int(row.Order)+5
                     ws.copy_rows(cur_row, 1, above=False, copy_style=True, fill_formulae=True)
@@ -565,6 +597,15 @@ class ZbAnalyser():
                         cell.value = cell.value.replace('v<#Severity#>', str(row.Severity)) if cell.value else None
                         cell.value = cell.value.replace('v<#Observation#>', row.Observation) if cell.value else None
                         cell.value = cell.value.replace('v<#DateOf#>', row.DateOf) if cell.value else None
+                    if row.Severity != Severity.Ok:
+                        es.copy_rows(escurrow, 1, above=False, copy_style=True, fill_formulae=True)
+                        for cell in es.rows[escurrow-1]:
+                            if cell.column == 'A':
+                                cell.value = inFile
+                            else:
+                                cell.value = ws['%s%s' % (get_column_letter(column_index_from_string(cell.column)-1), cur_row)].value
+                        escurrow += 1
+                # Nulling last row
                 for cell in ws.rows[cur_row]:
                     cell.value = ''
                 cur_row = num+fs_init_row
@@ -589,7 +630,7 @@ def main():
     # zloyB.init_alarms()
     # for row in zloyB.alarms:
         # print(row)
-    zloyB.writexls('Preemptive_Support_Report_WRAN_Vimpelcom_NorthWest_')
+    zloyB.writexls('Preemptive_Support_Report_')
 
     # BSC => GRAN
     # RNC => WRAN
