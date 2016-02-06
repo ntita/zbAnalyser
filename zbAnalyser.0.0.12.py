@@ -3,6 +3,7 @@
 
 import copy
 import os
+import re
 from enum import Enum
 import datetime
 import openpyxl
@@ -219,7 +220,8 @@ class ZbAnalyser():
                        ('Current software level', 'cvcu',
                         '(?i)((?:[\w+ ]+: +[\w%=/]+ +[\w/]+ +W[\d.]+ \([\w\d.-]+\)\n|-{10,}\n)+)',
                         '[\w+ ]+: +[\w%=/]+ +[\w/]+ +W([\d.]+) \([\w\d.-]+\)', ''),
-                       # ('Check ethernet connectivity (i.e. Internal_IP_Transport Vlan)', ('steg', 'stip'), '', '', ''),
+                       ('Check ethernet connectivity (i.e. Internal_IP_Transport Vlan)', ('steg', 'stip'), 'EXCEPTION',
+                        'EXCEPTION', 'EXCEPTION'),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\n'
                         r'MO +Attribute +Value\n={10,}\n'
@@ -280,9 +282,6 @@ class ZbAnalyser():
             outputREO = re.compile(commandRegExp % (check[Check.Command.value] if not isinstance(check[Check.Command.value], tuple) else str(check[Check.Command.value]).replace('(','(?:', 1).replace(", ","|",1).replace("'","")))
             if outputREO.search(self.log) is None:
                 print('%s - outputRE is fail!' % nextStr.CheckName)
-                outputLinesRE = re.compile(r'(?si)Board +Position +Remote +Speed +Conf +AutNg +Sys +STL +Prio +Cost '
-                                           r'+RtCost +Role-State +Edge +PbitQMap +UnIng +Vlans\n={10,}\n.*?={10,}\n'
-                                           r'Total: \d+ MOs')
                 continue
             for output in outputREO.findall(self.log):
                 if output is None:
@@ -292,7 +291,89 @@ class ZbAnalyser():
                 if commandDateRE:
                     nextStr.DateOf += (' ' if nextStr.DateOf != '' else '') + commandDateRE.group(1)
                 if nextStr.CheckName == 'Check ethernet connectivity (i.e. Internal_IP_Transport Vlan)' :
-
+                    novlans = False
+                    prioequal = False
+                    pbitqmapnequal = False
+                    dscppbitmapnequal = False
+                    edgeoff = None
+                    header = re.compile(r'(?i)(Board +)(.*)(Speed +)(.*)(Prio +)(.*)(Edge +)(PbitQMap +)(.*)(Vlans)').search(output)
+                    outputLinesRE = re.compile(r'(?si)Board +.*Speed.*Prio.*Edge +PbitQMap.*Vlans\n={10,}\n'
+                                               r'(.*?)={10,}\nTotal: \d+ MOs')
+                    if outputLinesRE.search(output):
+                        iboard = 0
+                        ispeed = 1
+                        iprio = 2
+                        iedge=3
+                        ipbitqmap = 4
+                        ivlans = 5
+                        pbitqmap = None
+                        prioequal = True
+                        prio = None
+                        for outputLines in outputLinesRE.findall(output):
+                            elementRE = re.compile(r'(?P<board>.{%d}).{%d}(?P<speed>.{%d}).{%d}(?P<prio>.{%d}).{%d}'
+                                                   r'(?P<edge>.{%d})(?P<pbitqmap>.{%d}).{%d}(?P<vlans>.*)' %
+                                                   (len(header.group(1)), len(header.group(2)), len(header.group(3)),
+                                                    len(header.group(4)), len(header.group(5)), len(header.group(6)),
+                                                    len(header.group(7)), len(header.group(8)), len(header.group(9))))
+                            for element in elementRE.findall(outputLines):
+                                if element[iedge].strip(' ').lower() == 'edge_on':
+                                    edgeoff = False
+                                elif edgeoff is None:
+                                    edgeoff = True
+                                if pbitqmap is None:
+                                    pbitqmap = element[ipbitqmap].strip(' ').lower()
+                                elif pbitqmap != element[ipbitqmap].strip(' ').lower():
+                                    pbitqmapnequal = True
+                                if prio is None:
+                                    prio = element[iprio].strip(' ').lower()
+                                elif prio != element[iprio].strip(' ').lower():
+                                    prioequal = False
+                                if ((element[iboard].strip(' ').lower() == 'cmxb' and
+                                     element[ispeed].strip(' ').lower() == 'nolink' and
+                                     element[ivlans].strip(' ').lower() == '') or
+                                    (element[iboard].strip(' ').lower() == 'ipg' and
+                                     element[ivlans].strip(' ').lower() == '')):
+                                    novlans = True
+                    header = re.compile(r'(?i)(Board +)(.*)(Speed +)(.*)(Vlans +)(DscpPbitMap)').search(output)
+                    outputLinesRE = re.compile(r'(?si)Board.*Speed.*Vlans +DscpPbitMap\n={10,}\n'
+                                               r'(.*?)={10,}\nTotal: \d+ MOs')
+                    if outputLinesRE.search(output):
+                        iboard = 0
+                        ispeed = 1
+                        ivlans = 2
+                        idscppbitmap = 3
+                        dscppbitmap = None
+                        for outputLines in outputLinesRE.findall(output):
+                            elementRE = re.compile(r'(?P<board>.{%d}).{%d}(?P<speed>.{%d}).{%d}(?P<vlans>.{%d}).{%d}'
+                                                   r'(?P<dscppbitmap>.*)' %
+                                                   (len(header.group(1)), len(header.group(2)), len(header.group(3)),
+                                                    len(header.group(4)), len(header.group(5)), len(header.group(6))))
+                            for element in elementRE.findall(outputLines):
+                                if dscppbitmap is None:
+                                    dscppbitmap = element[idscppbitmap].strip(' ').lower()
+                                elif dscppbitmap != element[idscppbitmap].strip(' ').lower():
+                                    dscppbitmapnequal = True
+                                if ((element[iboard].strip(' ').lower() == 'cmxb' and
+                                     element[ispeed].strip(' ').lower() == 'nolink' and
+                                     element[ivlans].strip(' ').lower() == '') or
+                                    (element[iboard].strip(' ').lower() == 'ipg' and
+                                     element[ivlans].strip(' ').lower() == '')):
+                                    novlans = True
+                    if novlans:
+                        nextStr.Severity = Severity.Critical
+                    elif prioequal:
+                        if nextStr.Severity.value[0] > Severity.Major.value[0]:
+                            nextStr.Severity = Severity.Major
+                    elif pbitqmapnequal or dscppbitmapnequal:
+                        if nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                            nextStr.Severity = Severity.Minor
+                    elif edgeoff:
+                        if nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                            nextStr.Severity = Severity.Warning
+                    if nextStr.Severity != Severity.Ok:
+                        nextStr.Observation = 'NOk'
+                    else:
+                        nextStr.Observation += 'Ok'
                     continue
                 outputLinesRE = re.search(check[Check.Output.value], output)
                 if outputLinesRE is None:
