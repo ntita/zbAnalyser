@@ -221,7 +221,11 @@ class ZbAnalyser():
                         '(?i)((?:[\w+ ]+: +[\w%=/]+ +[\w/]+ +W[\d.]+ \([\w\d.-]+\)\n|-{10,}\n)+)',
                         '[\w+ ]+: +[\w%=/]+ +[\w/]+ +W([\d.]+) \([\w\d.-]+\)', ''),
                        ('Check ethernet connectivity (i.e. Internal_IP_Transport Vlan)', ('steg', 'stip'), 'EXCEPTION',
-                        'EXCEPTION', 'EXCEPTION'),
+                        'EXCEPTION', ''),
+                       ('Check CC/DC/PDR allocation', ('lh cenmp drhcendh cc', 'lh cenmp drhcendh dc',
+                                                       'lh cenmp drhcendh pdr'),
+                        'EXCEPTION', 'EXCEPTION', ''),
+                       # ('Check for disable Mos', 'st all 1\.\*0', '', '', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\n'
                         r'MO +Attribute +Value\n={10,}\n'
@@ -263,6 +267,54 @@ class ZbAnalyser():
         self.alarms = tuple(self.alarms)
         return self.alarms
 
+    def check14(self, nextStr, output):
+        type = ''
+        if output.find('drhcendh cc') >= 0:
+            type = 'cc'
+        elif output.find('drhcendh dc') >= 0:
+            type = 'dc'
+        elif output.find('drhcendh pdr') >= 0:
+            type = 'pdr'
+        n, m, p = 0, 0, 1.
+        idisunique = True
+        e = re.compile(r'(?is)(\d+): +deviceId +devFroId +boardPiuFroId +admState +opState +capability +subrack '
+                       r'+servingRhModuleId +linkHandlerName +ptmLm +faultTable +state +msgBoard'
+                       r'\n(.*?)\n\1: Summary of resource handlers:')
+        if e.search(output):
+            for outputlines in e.findall(output):
+                e1 = re.compile(r'(?i).*?(\w+) (\[.*\])')
+                if e1.search(outputlines[1]):
+                    for status, msgboard in e1.findall(outputlines[1]):
+                        if msgboard.lower().strip(' ') != '[linkestablished synced allocatedsp allocatedrh ]':
+                            n += 1
+                        if status.lower().strip(' ') == 'idle':
+                            m += 1
+                    p = m / len(e1.findall(outputlines[1]))
+        e = re.compile(r'(?is)\d+: +moduleId +boardPiuFroId +moduleRole +connected +subrack +noSpDev +capability +'
+                       r'allocatedShare +properShare +pendingRebalance\n'
+                       r'(.*?)\n?={10,}')
+        if e.search(output):
+            mset = set()
+            for outputlines in e.findall(output):
+                e1 = re.compile(r'(?is)^\d+: +(\d+)')
+                if e1.search(outputlines):
+                    for moduleid in e1.findall(outputlines):
+                        if moduleid in mset:
+                            idisunique = False
+                            break
+                        mset.add(moduleid)
+        if n > 2:
+            nextStr.Severity = Severity.Critical
+        elif n > 0 or idisunique is False:
+            if nextStr.Severity.value[0] > Severity.Major.value[0]:
+                nextStr.Severity = Severity.Major
+        elif p >= 0.5:
+            if nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                nextStr.Severity = Severity.Warning
+        nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + '%s status are %s' % \
+        (type.upper(), 'NOK' if nextStr.Severity != Severity.Ok else 'OK')
+        return nextStr
+
     def parseLog(self, nodename):
         if self.log is None:
             print('No log!')
@@ -279,7 +331,7 @@ class ZbAnalyser():
                self.alarmsReferenceName != check[Check.AlarmsReference.value]):
                 self.alarmsReferenceName = check[Check.AlarmsReference.value]
                 self.init_alarms()
-            outputREO = re.compile(commandRegExp % (check[Check.Command.value] if not isinstance(check[Check.Command.value], tuple) else str(check[Check.Command.value]).replace('(','(?:', 1).replace(", ","|",1).replace("'","")))
+            outputREO = re.compile(commandRegExp % (check[Check.Command.value] if not isinstance(check[Check.Command.value], tuple) else str(check[Check.Command.value]).replace('(','(?:', 1).replace(", ","|").replace("'","")))
             if outputREO.search(self.log) is None:
                 print('%s - outputRE is fail!' % nextStr.CheckName)
                 continue
@@ -289,7 +341,12 @@ class ZbAnalyser():
                     continue
                 commandDateRE = re.search(r'(\d{6})-\d{2}:\d{2}:\d{2}', output)
                 if commandDateRE:
-                    nextStr.DateOf += (' ' if nextStr.DateOf != '' else '') + commandDateRE.group(1)
+                    if nextStr.DateOf != '' and nextStr.DateOf != commandDateRE.group(1):
+                        print("Command date is different!")
+                    nextStr.DateOf = commandDateRE.group(1)
+                if nextStr.CheckName == 'Check CC/DC/PDR allocation' :
+                    nextStr = self.check14(nextStr, output)
+                    continue
                 if nextStr.CheckName == 'Check ethernet connectivity (i.e. Internal_IP_Transport Vlan)' :
                     novlans = False
                     prioequal = False
