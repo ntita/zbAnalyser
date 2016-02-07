@@ -179,8 +179,8 @@ class ZbAnalyser():
                        ('Check Event and System Logs', 'lgesmr 7d',
                         r'(?si)Timestamp \(UTC\) +Type +Merged Log Entry\n'
                         r'={10,}\n'
-                        r'(.*)', r'(?i)[\d-]+ [\d:]+ +\w+ +(?:(?:(?:\w+=\w+),)+(\w+=\w+)|(?:Crash on (\d+), '
-                                 r'device=(\d+) [\w\d]+)) +(.+)', ''),
+                        r'(.*)', r'(?i)[\d-]+ [\d:]+ +\w+ +(?:(?:(?:\w+=[\w-]+),)+(\w+=[\w-]+)|(?:Crash on (\d+), '
+                                 r'device=(\d+) \w+)) +(.+)', ''),
                        ('Check Node Restart and System Downtime', 'lgd',
                         r'(?si)Timestamp \(UTC\) +RestartType/Reason +Configuration Version +SwRelease +CPP Downtime +'
                         r'Appl. Downtime +JVM Downtime\n'
@@ -246,7 +246,10 @@ class ZbAnalyser():
                         r'ManagedElement=\d+ +healthCheckSchedule t\[(\d+)\].*\n?'
                         r'(?: >>> Struct\[\d\] +has \d+.*)?\n?'
                         r'(?: >>> 1[.]time = \d{2}:\d{2})?\n?'
-                        r'(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''))
+                        r'(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''),
+                       ('Check repartition of IubLinks and Cells', 'lkra',
+                        '(?is)Sr +Mod +S +GPB +nIub +CellGPB +CellCC +nCC\n-{10,}\n'
+                        '(.*?)\n?-{10,}\n+Cell repartition by Board:', '', ''))
         self.output = []
         self.wb = None
         self.log = None
@@ -561,7 +564,7 @@ class ZbAnalyser():
                         for element in elementRE.findall(outputLines):
                             opdate = datetime.date(int(element[0]), int(element[1]), int(element[2]))
                             repdate = datetime.date(2000 + int(nextStr.DateOf[0:2]), int(nextStr.DateOf[2:4]), int(nextStr.DateOf[4:6]))
-                            if (opdate - repdate).days <= 14:
+                            if (repdate - opdate).days <= 14:
                                 sum += 1
                     if sum > 1:
                         nextStr.Severity = Severity.Critical
@@ -692,7 +695,8 @@ class ZbAnalyser():
                                 nextStr.Severity = Severity.Warning
                     if nextStr.Observation == '':
                         nextStr.Observation = 'Total: %d MOs' % 0
-                if check[Check.Command.value] == self.checks[15][Check.Command.value] and check[Check.Caption.value] == self.checks[15][Check.Caption.value]:
+                if (check[Check.Command.value] == self.checks[15][Check.Command.value] and
+                        check[Check.Caption.value] == self.checks[15][Check.Caption.value]):
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0].lower() != '0 (ok)':
                         if nextStr.Severity.value[0] > Severity.Minor.value[0]:
@@ -700,7 +704,8 @@ class ZbAnalyser():
                         nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check is NOK'
                     else:
                         nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check is OK'
-                if check[Check.Command.value] == self.checks[16][Check.Command.value] and check[Check.Caption.value] == self.checks[16][Check.Caption.value]:
+                if (check[Check.Command.value] == self.checks[16][Check.Command.value] and
+                        check[Check.Caption.value] == self.checks[16][Check.Caption.value]):
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0] == '0':
                         nextStr.Severity = Severity.Warning
