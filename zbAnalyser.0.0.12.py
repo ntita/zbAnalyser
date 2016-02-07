@@ -227,6 +227,16 @@ class ZbAnalyser():
                         'EXCEPTION', 'EXCEPTION', ''),
                        ('Check for disable Mos', 'st all 1\.\*0', '(?is)Proxy +Adm +State +Op. +State +MO\n={10,}\n'
                                                                   '(.*?)\n?={10,}\nTotal: \d+ MOs', '(.+)', ''),
+                       ('Health check result', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
+                        r'(?si)={10,}\n'
+                        r'MO +Attribute +Value\n={10,}\n'
+                        r'(.*?)\n?'
+                        r'={10,}\n'
+                        r'Total: \d+ Mos',
+                        r'(?i)ManagedElement=\d+ +healthCheckResult Struct\{\d\}.*\n?'
+                        r'(?: >>> 1.healthCheckResultCode = (\d+ \(\w+\)).*)?\n?'
+                        r'(?: >>> 2.message = (.*))?\n?'
+                        r'(?: >>> 3.startTime = [\d-]+ [\d:]+)?', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\n'
                         r'MO +Attribute +Value\n={10,}\n'
@@ -682,7 +692,15 @@ class ZbAnalyser():
                                 nextStr.Severity = Severity.Warning
                     if nextStr.Observation == '':
                         nextStr.Observation = 'Total: %d MOs' % 0
-                if check[Check.Command.value] == self.checks[15][Check.Command.value]:
+                if check[Check.Command.value] == self.checks[15][Check.Command.value] and check[Check.Caption.value] == self.checks[15][Check.Caption.value]:
+                    element = elementRE.search(outputLines)
+                    if element is None or element.groups()[0].lower() != '0 (ok)':
+                        if nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                            nextStr.Severity = Severity.Minor
+                        nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check is NOK'
+                    else:
+                        nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check is OK'
+                if check[Check.Command.value] == self.checks[16][Check.Command.value] and check[Check.Caption.value] == self.checks[16][Check.Caption.value]:
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0] == '0':
                         nextStr.Severity = Severity.Warning
