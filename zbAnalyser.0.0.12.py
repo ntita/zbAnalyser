@@ -225,7 +225,8 @@ class ZbAnalyser():
                        ('Check CC/DC/PDR allocation', ('lh cenmp drhcendh cc', 'lh cenmp drhcendh dc',
                                                        'lh cenmp drhcendh pdr'),
                         'EXCEPTION', 'EXCEPTION', ''),
-                       # ('Check for disable Mos', 'st all 1\.\*0', '', '', ''),
+                       ('Check for disable Mos', 'st all 1\.\*0', '(?is)Proxy +Adm +State +Op. +State +MO\n={10,}\n'
+                                                                  '(.*?)\n?={10,}\nTotal: \d+ MOs', '(.+)', ''),
                        ('Health check scheduler', 'get ManagedElement=1 healthCheckResult\|healthCheckSchedule',
                         r'(?si)={10,}\n'
                         r'MO +Attribute +Value\n={10,}\n'
@@ -670,7 +671,18 @@ class ZbAnalyser():
                                 nextStr.Severity = Severity.Critical
                             minVer = element if minVer == '' or element < minVer else minVer
                         nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + 'Release W%s' % minVer
-                if check[Check.Command.value] == self.checks[12][Check.Command.value]:
+                if check[Check.Command.value] == self.checks[14][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        for element in elementRE.findall(outputLines):
+                            pass
+                        nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + \
+                                               'Total: %d MOs' % len(elementRE.findall(outputLines))
+                        if len(elementRE.findall(outputLines)) > 20:
+                            if nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                                nextStr.Severity = Severity.Warning
+                    if nextStr.Observation == '':
+                        nextStr.Observation = 'Total: %d MOs' % 0
+                if check[Check.Command.value] == self.checks[15][Check.Command.value]:
                     element = elementRE.search(outputLines)
                     if element is None or element.groups()[0] == '0':
                         nextStr.Severity = Severity.Warning
