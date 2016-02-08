@@ -249,7 +249,7 @@ class ZbAnalyser():
                         r'(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''),
                        ('Check repartition of IubLinks and Cells', 'lkra',
                         '(?is)Sr +Mod +S +GPB +nIub +CellGPB +CellCC +nCC\n-{10,}\n'
-                        '(.*?)\n?-{10,}\n+Cell repartition by Board:', '', ''))
+                        '(.*?)\n?-{10,}\n+Cell repartition by Board:', '(?i)^\w+ +(?P<mod>\d+) +\d+ +\w+ +(?P<niub>\d+)', ''))
         self.output = []
         self.wb = None
         self.log = None
@@ -712,6 +712,12 @@ class ZbAnalyser():
                         nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check Schedule is NOK'
                     else:
                         nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check Schedule is OK'
+                if check[Check.Command.value] == self.checks[17][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        repartition = { niub:mod for mod, niub in elementRE.findall(outputLines) }
+                        max = [repartition.keys].sort()[-1]
+                        mods = repartition.get(max)
+
             if nextStr.Observation == '':
                 nextStr.Observation = 'No alarms'
             print('%s - Done' % nextStr.CheckName)
