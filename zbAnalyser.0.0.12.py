@@ -249,7 +249,13 @@ class ZbAnalyser():
                         r'(?: >>> 2[.]weekday = \d+ \(\w+\))?', ''),
                        ('Check repartition of IubLinks and Cells', 'lkra',
                         '(?is)Sr +Mod +S +GPB +nIub +CellGPB +CellCC +nCC\n-{10,}\n'
-                        '(.*?)\n?-{10,}\n+Cell repartition by Board:', '', ''))
+                        '(.*?)\n?-{10,}\n+Cell repartition by Board:',
+                        '(?i)\w+ +(?P<mod>\d+) +\d+ +\w+ +(?P<niub>\d+).*', ''),
+                       ('Check main KPI', 'pmr -m 12 -r 1', '(?si)Object Counter *\n(.+)',
+                        '(?i) +(?P<name>\w+) +(?P<value>[\w/.]+)', ''),
+                       ('Check redundancy state',
+                        ('lh coremp mirror stat', 'st SwitchInternalLink', 'get SwitchCoreUnit state'),
+                        'EXCEPTION', 'EXCEPTION', ''))
         self.output = []
         self.wb = None
         self.log = None
@@ -329,6 +335,43 @@ class ZbAnalyser():
         (type.upper(), 'NOK' if nextStr.Severity != Severity.Ok else 'OK')
         return nextStr
 
+    def check19(self, nextStr, output):
+        outputLinesRE = re.compile(r'(?si)lhsh \d+ mirror stat(.*?)(?:=|\$)')
+        if outputLinesRE.search(output):
+            connected, active, passive, status = 0, 0, 0, 0
+            for outputLines in outputLinesRE.findall(output):
+                if re.search('Peer Disk: +Connected', outputLines, re.IGNORECASE):
+                    connected += 1
+                if re.search('(?i)Mount Status: +Active', outputLines):
+                    active += 1
+                if re.search('(?i)Mount Status: +Passive', outputLines):
+                    passive += 1
+                if re.search('(?i)Peer Disk Status: +Valid', outputLines):
+                    status += 1
+            if connected != 2 or active != 1 or passive != 1 or status == 0:
+                nextStr.Severity = Severity.Critical
+        outputLinesRE = re.compile(r'(?si)MO +Attribute +Value\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ MOs')
+        if outputLinesRE.search(output):
+            for outputLines in outputLinesRE.findall(output):
+                for line in re.findall('(.*)', outputLines):
+                    if line.lower().find('unlocked') >= 0 and line.lower().find('disabled') >= 0:
+                        if nextStr.Severity.value[0] > Severity.Major.value[0]:
+                            nextStr.Severity = Severity.Major
+                        break
+                    if line.lower().find('(locked') >= 0:
+                        if nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                            nextStr.Severity = Severity.Warning
+        outputLinesRE = re.compile(r'(?si)Proxy +Adm +State +Op. State +MO\n={10,}\n(.*?)\n?={10,}\nTotal: \d+ MOs')
+        if outputLinesRE.search(output):
+            for outputLines in outputLinesRE.findall(output):
+                for line in re.findall('(.*)', outputLines):
+                    if line.lower().find('(locked') >= 0:
+                        if nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                            nextStr.Severity = Severity.Warning
+                        break
+        nextStr.Observation = 'Redundancy %sOK' % ('N' if nextStr.Severity != Severity.Ok else '')
+        return nextStr
+
     def parseLog(self, nodename):
         if self.log is None:
             print('No log!')
@@ -358,6 +401,9 @@ class ZbAnalyser():
                     if nextStr.DateOf != '' and nextStr.DateOf != commandDateRE.group(1):
                         print("Command date is different!")
                     nextStr.DateOf = commandDateRE.group(1)
+                if nextStr.CheckName == 'Check redundancy state' :
+                    nextStr = self.check19(nextStr, output)
+                    continue
                 if nextStr.CheckName == 'Check CC/DC/PDR allocation' :
                     nextStr = self.check14(nextStr, output)
                     continue
@@ -712,6 +758,73 @@ class ZbAnalyser():
                         nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check Schedule is NOK'
                     else:
                         nextStr.Observation = ('\n' if nextStr.Observation != '' else '') + 'Health Check Schedule is OK'
+                if check[Check.Command.value] == self.checks[17][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        mods = {}
+                        repartition = sorted([(int(mod), int(niub)) for mod, niub in elementRE.findall(outputLines)],key=lambda t: t[1], reverse=True)
+                        for mod, niub in repartition:
+                            if mods == {}:
+                                mods[niub] = [mod]
+                            else:
+                                if niub in mods.keys():
+                                    mods[niub].append(mod)
+                                else:
+                                    break
+                        if list(mods.keys())[0] >= 16:
+                            if nextStr.Severity.value[0] > Severity.Major:
+                                nextStr.Severity = Severity.Major
+                        elif list(mods.keys())[0] >= 12:
+                            if nextStr.Severity.value[0] > Severity.Warning:
+                                nextStr.Severity = Severity.Warning
+                        nextStr.Observation += ('\n' if nextStr.Observation != '' else '') + \
+                                               'Max num %d at MODs: %s' % (list(mods.keys())[0],
+                                                                           str(list(mods.values())).strip('[]'))
+                        print(mods)
+                if check[Check.Command.value] == self.checks[18][Check.Command.value]:
+                    if elementRE.search(outputLines):
+                        objects = {name.lower(): counter for name, counter in elementRE.findall(outputLines)}
+                        if ((objects['psaccess'] != 'N/A' and float(objects['psaccess']) <= 90) or
+                            (objects['spchaccess'] != 'N/A' and float(objects['spchaccess']) <= 90) or
+                            (objects['rrcsuc'] != 'N/A' and float(objects['rrcsuc']) <= 90) or
+                            (objects['psrabsucc'] != 'N/A' and float(objects['psrabsucc']) <= 90) or
+                            (objects['spchrabsuc'] != 'N/A' and float(objects['spchrabsuc']) <= 90) or
+                            (objects['spchdrop'] != 'N/A' and float(objects['spchdrop']) >= 4) or
+                            (objects['psdrop'] != 'N/A' and float(objects['psdrop']) >= 4)):
+                            nextStr.Severity = Severity.Critical
+                        elif ((objects['psaccess'] != 'N/A' and float(objects['psaccess']) <= 95) or
+                              (objects['spchaccess'] != 'N/A' and float(objects['spchaccess']) <= 95) or
+                              (objects['rrcsuc'] != 'N/A' and float(objects['rrcsuc']) <= 95) or
+                              (objects['psrabsucc'] != 'N/A' and float(objects['psrabsucc']) <= 95) or
+                              (objects['spchrabsuc'] != 'N/A' and float(objects['spchrabsuc']) <= 95) or
+                              (objects['spchdrop'] != 'N/A' and float(objects['spchdrop']) >= 3) or
+                              (objects['psdrop'] != 'N/A' and float(objects['psdrop']) >= 3)):
+                            if nextStr.Severity.value[0] > Severity.Major.value[0]:
+                                nextStr.Severity = Severity.Major
+                        elif ((objects['psaccess'] != 'N/A' and float(objects['psaccess']) <= 97) or
+                              (objects['spchaccess'] != 'N/A' and float(objects['spchaccess']) <= 97) or
+                              (objects['rrcsuc'] != 'N/A' and float(objects['rrcsuc']) <= 97) or
+                              (objects['psrabsucc'] != 'N/A' and float(objects['psrabsucc']) <= 97) or
+                              (objects['spchrabsuc'] != 'N/A' and float(objects['spchrabsuc']) <= 97) or
+                              (objects['spchdrop'] != 'N/A' and float(objects['spchdrop']) >= 2) or
+                              (objects['psdrop'] != 'N/A' and float(objects['psdrop']) >= 2)):
+                            if nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                                nextStr.Severity = Severity.Minor
+                        elif ((objects['psaccess'] != 'N/A' and float(objects['psaccess']) <= 98) or
+                              (objects['spchaccess'] != 'N/A' and float(objects['spchaccess']) <= 98) or
+                              (objects['rrcsuc'] != 'N/A' and float(objects['rrcsuc']) <= 98) or
+                              (objects['psrabsucc'] != 'N/A' and float(objects['psrabsucc']) <= 98) or
+                              (objects['spchrabsuc'] != 'N/A' and float(objects['spchrabsuc']) <= 98) or
+                              (objects['spchdrop'] != 'N/A' and float(objects['spchdrop']) >= 1.5) or
+                              (objects['psdrop'] != 'N/A' and float(objects['psdrop']) >= 1.5)):
+                            if nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                                nextStr.Severity = Severity.Warning
+                        nextStr.Observation += ('\n' if nextStr.Observation != '' else '')
+                        nextStr.Observation += 'Main KPIs are %sOK' % ('N' if nextStr.Severity != Severity.Ok else '')
+                        nextStr.Observation += '\n' + 'HsAccess %s; HsDrop %s; PSAccess %s; PSCCSR %s; PSDrop %s; ' \
+                                                      'RrcSuc %s; SpchAccess %s' % \
+                                                      (objects['hsaccess'], objects['hsdrop'], objects['psaccess'],
+                                                       objects['psccsr'], objects['psdrop'], objects['rrcsuc'],
+                                                       objects['spchaccess'])
             if nextStr.Observation == '':
                 nextStr.Observation = 'No alarms'
             print('%s - Done' % nextStr.CheckName)
