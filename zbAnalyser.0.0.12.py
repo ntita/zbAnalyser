@@ -306,6 +306,19 @@ class ZbAnalyser():
                         syncrefstatus.add(w)
                 nextStr.Observation += '\n' if nextStr.Observation != '' else ''
                 nextStr.Observation += '%s; %s' % (nodesystemclock, str(syncrefstatus).strip('{}'))
+        outputLinesRE = re.compile(r'(?is)Proxy +Adm +State +Op. State +MO\n={10,}\n.*?\n?={10,}\nTotal: \d+ MOs')
+        if outputLinesRE.search(output):
+            for outputLines in outputLinesRE.findall(output):
+                synx = [k for k in re.findall(r'(?i) +\d+ +\d+ +\((?!LOCKED)\w+\).* (.*TuSyncRef=1.*)', outputLines)]
+                if len(synx) > 0:
+                    c = re.search(r'(?m)^(?:[\w\d.]+)> get Synchronization=1\n((?:.*\n?(?!(?:^[\w\d.]+)>))*)', self.log).group(1)
+                    sync = [k for k in re.findall(r'(?i) >>> syncReference = (.+)', c)]
+                    for item in synx:
+                        if item not in sync:
+                            if nextStr.Severity.value[0] > Severity.Warning.value[0]:
+                                nextStr.Severity = Severity.Warning
+                            nextStr.Observation += '\n' if nextStr.Observation != '' else ''
+                            nextStr.Observation += 'check config'
         return nextStr
 
     def check14(self, nextStr, output):
