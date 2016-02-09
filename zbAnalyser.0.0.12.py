@@ -305,7 +305,10 @@ class ZbAnalyser():
                 e1 = re.compile(r'(?i).*?(\w+) (\[.*\])')
                 if e1.search(outputlines[1]):
                     for status, msgboard in e1.findall(outputlines[1]):
-                        if msgboard.lower().strip(' ') != '[linkestablished synced allocatedsp allocatedrh ]':
+                        if ((msgboard.lower().strip(' ') != '[linkestablished synced allocatedsp allocatedrh ]' and
+                             type != 'pdr') or
+                            (msgboard.lower().strip(' ') != '[linkestablished allocatedsp allocatedrh ]' and
+                             type == 'pdr')):
                             n += 1
                         if status.lower().strip(' ') == 'idle':
                             m += 1
@@ -642,7 +645,7 @@ class ZbAnalyser():
                             MOs += 1
                         if cs >= 2 or ps >= 2:
                             nextStr.Severity = Severity.Critical
-                        elif cs == 1 or ps == 1 or rs > 0 and nextStr.Severity.value[0] > Severity.Major.value[0]:
+                        elif cs > 0 or ps > 0 or rs > 0 and nextStr.Severity.value[0] > Severity.Major.value[0]:
                             nextStr.Severity = Severity.Major
                         elif MOs > 0 and nextStr.Severity.value[0] > Severity.Minor.value[0]:
                             nextStr.Severity = Severity.Minor
