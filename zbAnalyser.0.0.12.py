@@ -191,7 +191,7 @@ class ZbAnalyser():
                        ('Check Date and Time Synchronization', 'lh coremp readclock',
                         r'(?si)\d{6}-\d{2}:\d{2}:\d{2} [\w \d./=]+\n(.+)',
                         r'\$ lhsh 00\d{2}00 readclock\n\d+: Date: 20(\d{2})-(\d{2})-(\d{2})', ''),
-                       ('Check Network Synchronization', ('get Synchronization=1', 'st tusync'), '(.*)', '', ''),
+                       ('Check Network Synchronization', ('get Synchronization=1', 'st tusync'), 'EXCEPTION', '', ''),
                        ('Check the M3UA Associations', 'st m3ua',
                         '(?si)Proxy +Adm State +Op. +State +MO\n={10,}\n'
                         '(.*?)={10,}\n'
@@ -287,6 +287,26 @@ class ZbAnalyser():
                 headerfounded = True
         self.alarms = tuple(self.alarms)
         return self.alarms
+
+    def check5(self, nextStr, output):
+        outputLinesRE = re.compile(r'(?is)211 +TransportNetwork=1,Synchronization=1\n={10,}\n(.*?)\n?={10,}')
+        if outputLinesRE.search(output):
+            for outputLines in outputLinesRE.findall(output):
+                synx = {k.lower(): v for k, v in re.findall(r'((?: >>> )?\w+) +(.*)', outputLines)}
+                if (synx['syncrefstatus'].lower().find('ok') < 0 or
+                    int(re.search('\[(\d+)\]', synx['syncreference']).group(1)) < 2):
+                    nextStr.Severity = Severity.Critical
+                elif synx['syncrefstatus'].lower().replace('ok', '', 1).find('ok') < 0:
+                    if nextStr.Severity.value[0] > Severity.Minor.value[0]:
+                        nextStr.Severity = Severity.Minor
+                nodesystemclock = re.search('\(([\w ]+)\)', synx['nodesystemclock']).group(1)
+                syncrefstatus = set()
+                for w in re.findall('(\w+)', re.search(r'\(([\w ]+)\)', synx['syncrefstatus']).group(1)):
+                    if w.lower() != 'failed':
+                        syncrefstatus.add(w)
+                nextStr.Observation += '\n' if nextStr.Observation != '' else ''
+                nextStr.Observation += '%s; %s' % (nodesystemclock, str(syncrefstatus).strip('{}'))
+        return nextStr
 
     def check14(self, nextStr, output):
         type = ''
@@ -405,6 +425,9 @@ class ZbAnalyser():
                     if nextStr.DateOf != '' and nextStr.DateOf != commandDateRE.group(1):
                         print("Command date is different!")
                     nextStr.DateOf = commandDateRE.group(1)
+                if nextStr.CheckName == 'Check Network Synchronization' :
+                    nextStr = self.check5(nextStr, output)
+                    continue
                 if nextStr.CheckName == 'Check redundancy state' :
                     nextStr = self.check19(nextStr, output)
                     continue
