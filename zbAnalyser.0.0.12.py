@@ -167,7 +167,7 @@ class ZbAnalyser():
     """zbAnalyser! И этим всё сказано"""
     def __init__(self):
         super(ZbAnalyser, self).__init__()
-        self.currentTemplate = '160123_t.xlsx'
+        self.currentTemplate = '160211_t.xlsx'
         self.referenceError = 'Alarms_and_events.xlsx'
         self.dirs = { 'inputDir': './input', 'outputDir': './output', 'logDir': './log' }
         self.checks = (('Check active Alarms', 'alt', 
