@@ -915,7 +915,7 @@ class ZbAnalyser():
                 self.output = []
                 self.parseLog(inFile)
                 for cell in ws.rows[0]:
-                    cell.value = cell.value.replace('v<#LogDate#>', self.logdate) if cell.value else None
+                    cell.value = cell.value.replace('v<#LogDate#>', self.logdate) if cell.value else 'None'
                 es = self.wb['Error list. Summary']
                 escurrow = 5
                 for row in self.output:
