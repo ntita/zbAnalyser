@@ -884,7 +884,7 @@ class ZbAnalyser():
 
     def writexls(self,filename):
         fs_init_row = 6
-        self.wb = openpyxl.load_workbook(filename = self.currentTemplate)
+        self.wb = openpyxl.load_workbook(filename = os.path.join('template/', self.currentTemplate))
         fs = self.wb['Front Sheet']
         for cell in fs._cells.values():
             if cell.comment == 'AutoCopy':
